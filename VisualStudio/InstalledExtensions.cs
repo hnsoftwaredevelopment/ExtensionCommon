@@ -204,8 +204,13 @@ namespace ExtensionCommon.VisualStudio
 
         private static async Task<IEnumerable> CallAsync(Type api, object target, string method)
         {
-            var info = api.GetMethods().First(m => m.Name == method && m.GetParameters().All(p => p.IsOptional));
-            var args = info.GetParameters().Select(p => p.DefaultValue is DBNull ? null : p.DefaultValue).ToArray();
+            // In VS 2026 18.13 the CancellationToken is required, not optional. Accept both forms.
+            var info = api.GetMethods().FirstOrDefault(m => m.Name == method
+                           && m.GetParameters().All(p => p.IsOptional || p.ParameterType == typeof(System.Threading.CancellationToken)))
+                       ?? throw new MissingMethodException(api.FullName, method);
+            var args = info.GetParameters().Select(p => p.ParameterType == typeof(System.Threading.CancellationToken)
+                ? (object)System.Threading.CancellationToken.None
+                : p.DefaultValue is DBNull ? null : p.DefaultValue).ToArray();
             var task = (Task)info.Invoke(target, args);
             await task.ConfigureAwait(true);
             return (IEnumerable)task.GetType().GetProperty("Result").GetValue(task) ?? Enumerable.Empty<object>();
